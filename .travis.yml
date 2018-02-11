@@ -1,0 +1,12 @@
+language: ruby
+cache:
+  bundler: true
+rvm:
+- 2.4.0
+before_install:
+- bundle install
+script:
+- "./deploy.sh"
+branches:
+  only:
+  - master
