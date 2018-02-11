@@ -1,0 +1,23 @@
+<div id="sidebar">
+  <h1 style="font-size: 21px;">Jonas-Taha El Sesiy</h1>
+  <p>Software Engineer</p>
+  <p><a href="/about">Who am I?</a></p>
+  <img src="/assets/Jonas-TahaElSesiy.jpg" />
+
+  <!-- Social links -->
+  <ul class="social-media-list" style="margin-top: 20px; margin-bottom: 30px;">
+    <li>
+      {% include icon-github.html username=site.github_username %}
+    </li>
+    <li>
+      {% include icon-twitter.html username=site.twitter_username %}
+    </li>
+    <li>
+      {% include icon-linkedin.html username=site.linkedin_username %}
+    </li>
+  </ul>
+
+  <hr />
+
+  {% include disclaimer.html %}
+</div>
