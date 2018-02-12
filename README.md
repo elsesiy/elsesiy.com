@@ -1,5 +1,8 @@
 <h1><a href="https://elsesiy.com/" target="_blank">elsesiy.com</a></h1>
 
+[![Build Status](https://travis-ci.org/elsesiy/elsesiy.com.svg?branch=master)](https://travis-ci.org/elsesiy/elsesiy.com)
+[![Twitter](https://img.shields.io/badge/twitter-@elsesiy-blue.svg)](http://twitter.com/elsesiy)
+
 Feel free to contribute 👍 
 
 To run the server locally:
