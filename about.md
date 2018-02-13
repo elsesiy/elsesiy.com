@@ -20,7 +20,7 @@ meta: {}
 
   <p><b>Research</b></p>
 
-  <p>It started with my master's thesis on Blockchain applications for a specific supply chain use case and ever since I'm involved in various endeavours regarding the useful application of the technology. I'm working on a paper to be published soon.</p>
+  <p>It started with my master's thesis on Blockchain applications for a specific supply chain use case and ever since I'm involved in various endeavours regarding the useful application of the technology. I developed smart contracts on the Ethereum platform and also worked on Chaincode for a Hyperledger application. I'm working on a paper to be published soon.</p>
 
   <p><b>Open Source</b></p>
 

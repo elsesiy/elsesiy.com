@@ -27,6 +27,12 @@ $no-sidebar: "800px";
   display: none;
 }
 
+.image-caption {
+  text-align: center;
+  font-size: .8rem;
+  color: light-grey;
+}
+
 /* Hide sidebar on mobile device s */
 @media screen and (min-width: $no-sidebar) {
   #sidebar {
