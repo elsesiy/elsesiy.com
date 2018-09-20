@@ -58,6 +58,6 @@ I'll continue in the next part to explain how I actually got the physical green 
 
 FYI: I applied 3 times until I was lucky. All in-depth information on the process is provided by the Department of State and can be accessed [here][dv-process].
 
-[dv-photo-guidelines]: https://travel.state.gov/content/visas/en/general/photos.html
+[dv-photo-guidelines]: https://travel.state.gov/content/travel/en/us-visas/visa-information-resources/photos.html
 [dv-documents]: https://travel.state.gov/content/visas/en/immigrate/diversity-visa/if-you-are-selected/prepare-supporting-documents.html
 [dv-process]: https://travel.state.gov/content/visas/en/immigrate/diversity-visa/entry.html

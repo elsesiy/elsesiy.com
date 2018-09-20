@@ -12,7 +12,7 @@ meta: {}
 <h1 style="text-align: center; margin-bottom: 40px; margin-top: -50px">About</h1>
 
 <div>
-  <p>I'm a Software Engineer <a href="https://www.ibm.com/" target="_blank">@IBM</a> located out of the beautiful Berlin and passionate about various technologies and open source projects.</p>
+  <p>I'm a Software Engineer <a href="http://mbrdna.com/" target="_blank">@MBRDNA</a> working on Big Data for Automotive and former <a href="https://www.ibm.com/" target="_blank">@IBM</a>. Currently, I live in Silicon Valley but am originally from Berlin. My passion is software and I love contributing to open source projects.</p>
 
   <p><b>Technologies</b></p>
 
@@ -20,7 +20,7 @@ meta: {}
 
   <p><b>Research</b></p>
 
-  <p>It started with my master's thesis on Blockchain applications for a specific supply chain use case and ever since I'm involved in various endeavours regarding the useful application of the technology. I developed smart contracts on the Ethereum platform and also worked on Chaincode for a Hyperledger application. I'm working on a paper to be published soon.</p>
+  <p>It started with my master's thesis on Blockchain applications for a specific supply chain use case and ever since I'm involved in various endeavours regarding the useful application of the technology. I developed smart contracts on the Ethereum platform and also worked on Chaincode for a Hyperledger application.</p>
 
   <p><b>Open Source</b></p>
 
