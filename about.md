@@ -12,11 +12,11 @@ meta: {}
 <h1 style="text-align: center; margin-bottom: 40px; margin-top: -50px">About</h1>
 
 <div>
-  <p>I'm a Software Engineer <a href="http://mbrdna.com/" target="_blank">@MBRDNA</a> working on Big Data for Automotive and former <a href="https://www.ibm.com/" target="_blank">@IBM</a>. Currently, I live in Silicon Valley but am originally from Berlin. My passion is software and I love contributing to open source projects.</p>
+  <p>I'm a Data Engineer <a href="http://mbrdna.com/" target="_blank">@MBRDNA</a> working on Big Data for Automotive and a former Software Architect <a href="https://www.ibm.com/" target="_blank">@IBM</a>. I live in Silicon Valley but am originally from Berlin. My passion is building cool stuff and I love the open source space.</p>
 
   <p><b>Technologies</b></p>
 
-  <p>I did a lot of work in the field of native apps with corresponding backend services mainly written in Swift and Java. Lately I've been involved in Container technologies and DevOps toolchains to increase developer efficiency.</p>
+  <p>I did a lot of work in the field of native apps with corresponding backend services mainly written in Swift and Java. Lately, I've been involved in Container technologies and DevOps toolchains to increase developer efficiency. In my current role, I get to apply this knowledge in the field of big data processing :+1:.</p>
 
   <p><b>Research</b></p>
 
@@ -35,7 +35,7 @@ meta: {}
   <p>I graduated with a M.Sc. from the Karlsruhe Instite of Technology (<a href="https://www.kit.edu/" target="_blank">KIT</a>) in Germany.</p>
 
   <p><b>Resumé</b></p>
-  <p>If you're interested in my professional and educational history, you can take a look at my resumé <a href="/assets/about/17-08-08_Jonas-Taha El Sesiy_Resumé.pdf" target="_blank">here</a>.</p>
+  <p>If you're interested in my professional and educational history, you can take a look at my resumé <a href="/assets/about/18-10-04_Jonas-Taha El Sesiy_Resumé.pdf" target="_blank">here</a>.</p>
 </div>
 
 
