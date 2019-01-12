@@ -23,7 +23,7 @@ Furthermore, I saw a lot of different approaches in terms of runtime base image 
 
 While coming up with my current solution I had the following considerations to take into account. Local development should still be fast, the build process must be CI-friendly with clean & reproduceable builds and no additional tooling needed to secure the final image such as [microscanner][microscanner] or [clair][clair]. Hence, I created a `Makefile` that helps me take care of the heavy lifting and allows for fast local development where no Docker is used at all. A shortened & simplified version looks as follows:
 
-```
+```make
 OUT := binary-name
 PKG := github.com/package
 VERSION := $(shell git describe --always --dirty)
