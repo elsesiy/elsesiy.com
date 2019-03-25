@@ -16,7 +16,7 @@ I've been a working a lot in [Golang][golang] recently and even though it easily
 
 While coming up with an initial Dockerfile is easy, correctly compiling a Go application and adhere to all sorts of container best practices is still hard. Does the size of the binary matter? If so, you might want to provide some additional flags during compilation. 
 Do you build the app outside of the container and just copy the final artifact into it or do you use multi-stage builds to have everything within an isolated environment? How do you deal with caching of layers? How do you make sure that the final container is secure and only contains whatever is needed to execute your application? 
-
+<!--more-->
 The first thing I was overwhelmed with is how much old information is still out there and that even well-known developers such as [Tim Hockin][thockin-web] (co-creator of Kubernetes) are having [questions][thockin-twitter] on how to actually compile a Golang application *correctly*. As it turns out, some flags are [strictly unnecessary][gp-installsuffix] as of Go 1.10 but are still widely used. Ultimately, it all depends on your needs and whether you need [cgo][cgo] or not but even after studying a lot of blog posts I'm still not 100% sure about my approach. As it turns out, Tim created a nice [skeleton project][gh-go-build-template] which is a good starting point in my opinion.
 
 Furthermore, I saw a lot of different approaches in terms of runtime base image and how the build process takes place. Some are using for `golang:alpine` with manually installing ca-certs, tzinfo, etc. during the build stage whereas others use plain `golang` instead. For the final stage common choices are either `scratch` or `alpine` which still provide a larger attack surface than i.e. `gcr.io/distroless/base`. As with many things, there's not a single *correct* approach because one might want to keep the ability to `docker exec -it` into a container around whereas others have better ways to debug their services.
@@ -65,7 +65,7 @@ clean:
 I'll talk about `-ldflags` in a bit, so don't worry about it for now. Since the regular `go build` command doesn't do static analysis on the project files, I created steps like `vet` (checks for correctness/suspicious constructs), `lint` (style mistakes) and `errorcheck` (missing error handling) I can run whenever I feel like it. This is not done implicitly through another step such as `build` because my CI system takes care of these things too. The rest of the file should be self-explanatory if you're familiar with make.  
 Now, the following `Dockerfile` is only used in my CI system for which I don't mind it to fetch the dependencies during each build.
 
-```
+```docker
 # Build stage
 FROM golang:1.11.4 AS build-env
 

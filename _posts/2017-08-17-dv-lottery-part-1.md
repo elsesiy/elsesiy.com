@@ -34,7 +34,7 @@ I started to explore all the options that'll allow me to relocate eventually and
 - Number of children
 
 After submitting the info, a confirmation number is issued. This confirmation number is crucial to __note down__ as there's no way to recover it and is the only way to access the application in case of winning.
-
+<!--more-->
 Fast-forward to May the following year, the Department of State will send you an e-mail saying that you're now able to see the result of the lottery drawing so whether you've been selected to move forward with the application or that it didn't work out this time. In case of the former the real work begins...
 
 Being selected doesn't necessarily mean you're able to continue with the application as it depends on your batch number and the amount of visa applications your local embassy can process. So if your batch number is i.e. 65000 it's very unlikely you can move forward as the application needs to take place during a certain time period (referred to as fiscal year). If you're unable to have everything processed by the end of the fiscal period, you'll need to start over which means re-applying for the lottery as your lot is only valid for one fiscal year.
