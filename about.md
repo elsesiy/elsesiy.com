@@ -24,7 +24,7 @@ meta: {}
 
   <p><b>Open Source</b></p>
 
-  <p>I'm involved in various open source projects, such as <a href="https://github.com/alexanderepstein/Bash-Snippets" target="_blank">Bash-Snippets</a> or <a href="https://github.com/CVCalendar/CVCalendar" target="_blank">CVCalendar</a> and published some of my own like <a href="https://github.com/elsesiy/GAppAuth" target="_blank">GAppAuth</a> or <a href="https://github.com/elsesiy/crypto-trader" target="_blank">crypto-trader</a>.</p>
+  <p>I'm involved in various open source projects, such as <a href="https://github.com/alexanderepstein/Bash-Snippets" target="_blank">Bash-Snippets</a> or <a href="https://github.com/CVCalendar/CVCalendar" target="_blank">CVCalendar</a> and published some of my own like <a href="https://github.com/elsesiy/GAppAuth" target="_blank">GAppAuth</a>, <a href="https://github.com/elsesiy/qrgo" target="_blank">qrgo</a>, <a href="https://github.com/elsesiy/kubectl-view-secret" target="_blank">kubectl-view-secret</a> or <a href="https://github.com/elsesiy/crypto-trader" target="_blank">crypto-trader</a>.</p>
 
   <p><b>Previous Work</b></p>
 
