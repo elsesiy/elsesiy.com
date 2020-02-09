@@ -12,11 +12,11 @@ meta: {}
 <h1 style="text-align: center; margin-bottom: 40px; margin-top: -50px">About</h1>
 
 <div>
-  <p>I'm a Data Engineer <a href="http://mbrdna.com/" target="_blank">@MBRDNA</a> working on Big Data for Automotive and a former Software Architect <a href="https://www.ibm.com/" target="_blank">@IBM</a>. I live in Silicon Valley but am originally from Berlin. My passion is building cool stuff and I love the open source space.</p>
+  <p>I'm a Software Engineer <a href="http://snowflake.com/" target="_blank">@Snowflake</a> where I work on multi-cloud Kubernetes & infrastructure automation. Previously, I worked in a similar roles  <a href="http://mbrdna.com/" target="_blank">@MBRDNA</a> and <a href="https://www.ibm.com/" target="_blank">@IBM</a>. I live in Silicon Valley but am originally from Berlin. My passion is solving interesting problems and I find a lot of joy contributing to open source.</p>
 
   <p><b>Technologies</b></p>
 
-  <p>I did a lot of work in the field of native apps with corresponding backend services mainly written in Swift and Java. Lately, I've been involved in Container technologies and DevOps toolchains to increase developer efficiency. In my current role, I get to apply this knowledge in the field of big data processing :+1:.</p>
+  <p>I did a lot of work in the field of native apps with corresponding backend services mainly written in Swift and Java. Lately, I've been involved in Container technologies and DevOps toolchains to increase developer efficiency. In my current role I'm focusing on multi-cloud Kubernetes deployments in the data warehousing space :+1:.</p>
 
   <p><b>Research</b></p>
 
