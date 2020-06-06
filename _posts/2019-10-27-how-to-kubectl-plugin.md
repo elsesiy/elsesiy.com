@@ -15,7 +15,7 @@ type: post
 published: true
 meta: {}
 ---
-Hacktoberfest is almost over but since there're plenty of opportunities to contribute, I decided to takeover the task of re-writing a `kubectl` plugin called `view-secret`.
+Hacktoberfest is almost over but since there're plenty of opportunities to contribute, I decided to take over the task of re-writing a `kubectl` plugin called `view-secret`.
 For those of you who are not familar with `kubectl`, it's the CLI tool to work with [Kubernetes][kubernetes].
 In this post I'd like to shed some light on [krew][krew] and what's necessary to create your very own plugin. Okay, so what's krew?
 
