@@ -35,7 +35,7 @@ meta: {}
   <p>I graduated with a M.Sc. from the Karlsruhe Instite of Technology (<a href="https://www.kit.edu/" target="_blank">KIT</a>) in Germany.</p>
 
   <p><b>Resumé</b></p>
-  <p>If you're interested in my professional and educational history, you can take a look at my resumé <a href="/assets/about/19-09-04_Jonas-Taha El Sesiy_Resumé.pdf" target="_blank">here</a>.</p>
+  <p>If you're interested in my professional and educational history, you can take a look at my resumé <a href="/assets/about/20-06-07_Jonas-Taha El Sesiy_Resumé.pdf" target="_blank">here</a>.</p>
 </div>
 
 
