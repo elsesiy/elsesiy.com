@@ -10,7 +10,6 @@ tags:
 status: publish
 type: post
 published: true
-meta: {}
 ---
 As promised back in August, I'm finally continuing my post about the DV lottery. In this part I'm going to explain how I finally got the physical green card (compared to the temporary stamp in my passport) and what else I've been doing the whole time. Make sure to check out the [first][first-part] part if you haven't read it yet.
 

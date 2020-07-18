@@ -10,7 +10,6 @@ tags:
 status: publish
 type: post
 published: true
-meta: {}
 ---
 Over the last couple of months I've been asked many times how I got the green card (formally kwown as Permanent Resident Card or Form I-551). So here's my story..
 

@@ -10,7 +10,6 @@ tags:
 status: publish
 type: post
 published: true
-meta: {}
 ---
 Alright, this is the last part of the series on the ins and outs of the DV lottery. If you haven't read the previous articles already, make sure to find out everything about the interview process in the [first part][first-part] and the some of the initial actions to take arriving in the country if you're among the lucky ones in the [second part][second-part].  
 In this part, I'll be talking about getting a driver's license, job search, and international travel as a resident (how to keep your status as a resident).

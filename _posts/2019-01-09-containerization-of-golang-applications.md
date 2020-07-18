@@ -10,7 +10,6 @@ tags:
 status: publish
 type: post
 published: true
-meta: {}
 ---
 I've been a working a lot in [Golang][golang] recently and even though it easily allows for single static binary compilation I find myself using [Docker][docker] a lot. Why? Well, especially when it comes to container orchestration and scaling of workloads some sort of container technology is used as these build the foundation of a Pod in [Kubernetes][k8s] (our deployment infrastructure).
 

@@ -15,7 +15,6 @@ tags:
 status: publish
 type: post
 published: true
-meta: {}
 ---
 I recently read an [article][original-article] by [Florian Gamper][florian-gamper] about how he thinks blockchain and crypto currencies - Bitcoin in particular - are failing the "muggles" - a nice reference to the average Joe taken from Harry Potter. Even though he made some valid points, I feel the need to make some clarifications.
 

@@ -13,7 +13,6 @@ tags:
 status: publish
 type: post
 published: true
-meta: {}
 ---
 We all love the simplicity of deploying applications on Kubernetes and while many tutorials out there help you get started quickly and provide a great resource for many, some of them spare important details. In this post, I try to [help][help] the community by providing a small guide on how to deploy [oauth2_proxy][oauth2_proxy] with dynamic callback urls. But first, what is oauth2_proxy and which problem does it solve?
 
