@@ -28,7 +28,7 @@ meta: {}
 
   <p><b>Previous Work</b></p>
 
-  <p>I've been working in many industries and with various clients, like <a href="https://www.sda-se.com/" target="_blank">SDA SE</a>, <a href="https://www.signal-iduna.de/" target="_blank">Signal Iduna</a>, <a href="https://www.rewe.de/" target="_blank">REWE</a> and on several internal company projects.</p>
+  <p>I've been working in many industries and with various clients, like <a href="https://sda.se/" target="_blank">SDA SE</a>, <a href="https://www.signal-iduna.de/" target="_blank">Signal Iduna</a>, <a href="https://www.rewe.de/" target="_blank">REWE</a> and on several internal company projects.</p>
 
   <p><b>University</b></p>
 
