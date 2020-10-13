@@ -30,7 +30,7 @@ I really do care about the environment and I totally agree with all that has bee
 
 Another issue with this part is the made-up number of 80% of nodes being in China and the false claims about where the electricity is coming from. I haven't found any statistics on which node uses which source of energy, however, I found the acutal node distribution as of Feb, 12th 2018:
 
-![](/assets/posts/18-02-12_Bitcoin-Node-Distribution.png)
+![](/assets/posts/2018-02-12_Bitcoin-Node-Distribution.png)
 
 {:.image-caption}
 *Source: Bitnodes*
