@@ -64,4 +64,4 @@ Thanks for reading! It's unfortunate that I can't present you with a good soluti
 [service-ip-routing]: https://kubernetes.io/docs/concepts/services-networking/service/#virtual-ips-and-service-proxies
 [source-ip]: https://kubernetes.io/docs/tutorials/services/source-ip/
 [endpoint-removal-issue]:  https://github.com/kubernetes/kubernetes/issues/67592
-[kep-1669]: https://github.com/kubernetes/enhancements/tree/master/keps/sig-network/1669-graceful-termination-local-external-traffic-policy
+[kep-1669]: https://github.com/kubernetes/enhancements/tree/master/keps/sig-network/1669-proxy-terminating-endpoints
