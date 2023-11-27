@@ -1,0 +1,455 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.9.3">Jekyll</generator><link href="https://elsesiy.com/feed.xml" rel="self" type="application/atom+xml" /><link href="https://elsesiy.com/" rel="alternate" type="text/html" /><updated>2023-11-27T05:41:33+00:00</updated><id>https://elsesiy.com/feed.xml</id><title type="html">Jonas-Taha El Sesiy</title><subtitle>Personal website &amp; blog of Jonas-Taha El Sesiy</subtitle><entry><title type="html">Kubernetes: The client source IP preservation dilemma</title><link href="https://elsesiy.com/blog/kubernetes-client-source-ip-dilemma" rel="alternate" type="text/html" title="Kubernetes: The client source IP preservation dilemma" /><published>2020-10-12T00:00:00+00:00</published><updated>2020-10-12T00:00:00+00:00</updated><id>https://elsesiy.com/blog/kubernetes-client-source-ip-dilemma</id><content type="html" xml:base="https://elsesiy.com/blog/kubernetes-client-source-ip-dilemma">&lt;p&gt;A topic that’s been keeping me busy for a while now is how to ensure zero downtime when working in environments where the client source IP needs to be preserved. Let me elaborate on what the problem statement is exactly.&lt;/p&gt;
+
+&lt;p&gt;If you deploy an application on &lt;a href=&quot;https://kubernetes.io&quot;&gt;Kubernetes&lt;/a&gt; using a service type &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;LoadBalancer&lt;/code&gt;, the cloud controller manager deploys a L4 load balancer in your respective cloud provider environment and &lt;em&gt;usually&lt;/em&gt; allocates a public IP address for it. This allows users to effortlessly expose services to the public internet and common use cases include L7 load balancing solutions such as NGINX or Envoy. So far so good. Now if your application requires to know the real client IP this becomes a problem. 
+&lt;!--more--&gt;&lt;/p&gt;
+
+&lt;p&gt;To understand the difficulty with this scenario, let’s have a look at how traffic routing works within Kubernetes. Each node runs &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;kube-proxy&lt;/code&gt; which watches the API server for the addition or removal of service and endpoint objects. Without going into too much detail on user space, iptables and ipvs proxy modes, the basic idea is simple. When &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;kube-proxy&lt;/code&gt; sees a new service, it will open up a new (random) port on each node for it. Now, when a client connects to the service IP, the proxy redirects traffic to its own port using some low-level routing logic, selects a backend and will proxy traffic from the client to it.&lt;/p&gt;
+
+&lt;p&gt;This works across nodes as the Kubernetes master assigns virutal IPs for services and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;kube-proxy&lt;/code&gt; keeps track of backends across nodes. For more info on this matter, I suggest taking a look at the outstanding official documentation &lt;a href=&quot;https://kubernetes.io/docs/concepts/services-networking/service/#virtual-ips-and-service-proxies&quot;&gt;here&lt;/a&gt;.&lt;/p&gt;
+
+&lt;p&gt;For the more visiual readers, here’s how this looks when using &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;iptables&lt;/code&gt; proxy mode (most common).&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/assets/posts/2020-10-12-kube-proxy-iptables.svg&quot; alt=&quot;&quot; /&gt;&lt;/p&gt;
+
+&lt;p class=&quot;image-caption&quot;&gt;&lt;em&gt;Source: Kubernetes documentation&lt;/em&gt;&lt;/p&gt;
+
+&lt;p&gt;What you just read unfortunately doesn’t preserve the client source IP because &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;kube-proxy&lt;/code&gt; replaces the source IP with a cluster internal IP due to the fact that the proxy randomly selects a backend to forward the traffic to. To prevent that, Kubernetes has a feature which explicitly tells &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;kube-proxy&lt;/code&gt; to proxy requests only to local endpoints and not to other nodes. It’s as simple as setting the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;service.spec.externalTrafficPolicy&lt;/code&gt; to &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Local&lt;/code&gt; instead of the default &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Cluster&lt;/code&gt;. One thing to note here is that if there are no local endpoints, packets will be dropped. Again, more info on this can be found in the &lt;a href=&quot;https://kubernetes.io/docs/tutorials/services/source-ip/&quot;&gt;official docs&lt;/a&gt;.&lt;/p&gt;
+
+&lt;p&gt;Great, now our application is able to retrieve the actual client source IP instead of a cluster internal IP. This all sounds good until you have to think about upgrading your backend pods for the load balancer service, doing worker node ugprades or replacing entire nodepools.&lt;/p&gt;
+
+&lt;p&gt;Here’s why…&lt;br /&gt;
+When a new service is added, the cloud provider’s load balancer backend pools is updated with the node IP and node port selected by &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;kube-proxy&lt;/code&gt;. It then periodically checks whether the application is healthy using periodic probing. The healthchecks usually have to fail a certain retry count before the cloud provider decides to remove the ip from the load balancer pool. Now if &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;kube-proxy&lt;/code&gt; doesn’t forward traffic to a different node and there’s a delay between the service endpoint removal and the cloud provider backend pool ip romal, we’re blackholing traffic.&lt;/p&gt;
+
+&lt;p&gt;Unlike adding a new service endpoint which automatically gets propagated to the cloud load balancer configuration, the removal of an endpoint does not. This could be seen as a design flaw of the cloud controller manager implementation but this is not a trivial problem to solve as the cloud provider has no way of knowing how downstream applications behave when connections are closed.&lt;/p&gt;
+
+&lt;p&gt;When presented with the aforementioned problem statement, solutions often propose adding the following two remediation items:&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;Configure a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;preStop&lt;/code&gt; hook for the backend pods to &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;sleep&lt;/code&gt; for a certain period of time&lt;/li&gt;
+  &lt;li&gt;Configure &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;terminationGracePeriodSeconds&lt;/code&gt; for the pods to allow gracefully handle open connections before pod shutodwn&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;These are certainly important suggestions but only help in the case of a pod rolling update and only if either duration is at least as long as the cumulative time it takes for the health probes to fail and the backend pool to be updated. Since you might not have thought about this early on, you’re out of luck as changing it will trigger pod restarts.&lt;/p&gt;
+
+&lt;p&gt;At the heart of the issue is the fact that the node is registered to the load balancer and not individual pods. What complicates matters is the fact, that the service endpoint is removed regardless of a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;preStop&lt;/code&gt; hook or the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;terminationGracePeriodSeconds&lt;/code&gt;, see &lt;a href=&quot;https://github.com/kubernetes/kubernetes/issues/67592&quot;&gt;this issue&lt;/a&gt; for more context. Due to these circumstances it’s almost inevitable to end in a situation where new connections go nowhere which will cause a service disruption for a few unlucky users of your service (the endpoint is removed from the service while the existing pod on a node gracefully terminates and there may not be a second pod on the same node to serve the request).&lt;/p&gt;
+
+&lt;p&gt;Here’s a small diagram depicting the unfortunate situation.&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/assets/posts/2020-10-12-LB-dilemma.png&quot; alt=&quot;&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;So what can you do you’re asking?&lt;br /&gt;
+Well, until the the Kubernetes Enhancement Proposal (&lt;a href=&quot;https://github.com/kubernetes/enhancements/tree/master/keps/sig-network/1669-proxy-terminating-endpoints&quot;&gt;KEP-1669&lt;/a&gt;) is implemented which will dramatically improve the situation: not much. From what I know, you have to write some custom tooling to safely remove a node from your cloud provider load balancer outside of kubernetes since none of the existing primitives allow for zero downtime deployments.&lt;/p&gt;
+
+&lt;p&gt;Thanks for reading! It’s unfortunate that I can’t present you with a good solution but feel free to share your thoughts and reach out if you have any questions. Until next time :wave:&lt;/p&gt;</content><author><name></name></author><category term="kubernetes" /><category term="k8s" /><category term="cncf" /><category term="source ip" /><category term="load balancer" /><category term="kube-proxy" /><category term="externalTrafficPolicy" /><category term="graceful termination" /><category term="zero downtime" /><summary type="html">A topic that’s been keeping me busy for a while now is how to ensure zero downtime when working in environments where the client source IP needs to be preserved. Let me elaborate on what the problem statement is exactly.</summary></entry><entry><title type="html">Kubernetes: How to write a kubectl plugin</title><link href="https://elsesiy.com/blog/how-to-kubectl-plugin" rel="alternate" type="text/html" title="Kubernetes: How to write a kubectl plugin" /><published>2019-10-27T00:00:00+00:00</published><updated>2019-10-27T00:00:00+00:00</updated><id>https://elsesiy.com/blog/how-to-kubectl-plugin</id><content type="html" xml:base="https://elsesiy.com/blog/how-to-kubectl-plugin">&lt;p&gt;Hacktoberfest is almost over but since there’re plenty of opportunities to contribute, I decided to take over the task of re-writing a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;kubectl&lt;/code&gt; plugin called &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;view-secret&lt;/code&gt;.
+For those of you who are not familar with &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;kubectl&lt;/code&gt;, it’s the CLI tool to work with &lt;a href=&quot;https://kubernetes.io&quot;&gt;Kubernetes&lt;/a&gt;.
+In this post I’d like to shed some light on &lt;a href=&quot;https://krew.dev&quot;&gt;krew&lt;/a&gt; and what’s necessary to create your very own plugin. Okay, so what’s krew?&lt;/p&gt;
+
+&lt;p&gt;Krew is one of the many Kubernetes Special Interest Groups (SIG) and aims at solving the package management issue for &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;kubectl&lt;/code&gt;. There’s a limited amount of core functionality that ships with &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;kubectl&lt;/code&gt; so krew is all about allowing developers to create their own extensions and contribute them back to the community. All available plugins are stored in the &lt;a href=&quot;https://github.com/kubernetes-sigs/krew-index&quot;&gt;krew-index&lt;/a&gt;, a central repo that plugin maintainers use to publish/update their plugins. If you haven’t used krew before, make sure to &lt;a href=&quot;https://github.com/kubernetes-sigs/krew/#installation&quot;&gt;install&lt;/a&gt; it first.&lt;/p&gt;
+
+&lt;!--more--&gt;
+&lt;p&gt;Some early plugins have been written in Bash and the maintainer was asking the community to take over the re-write in Go/Python and ultimately the maintenance of the plugins.
+Since my day job requires me to create &amp;amp; manage Kubernetes-based deployments, I find myself in need of decoding secrets all the time.
+A &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;secret&lt;/code&gt; - &lt;em&gt;as the name may reveal already&lt;/em&gt; - is used to store secret information &lt;a href=&quot;https://en.wikipedia.org/wiki/Base64&quot;&gt;Base64&lt;/a&gt; encoded. This resource type is often used to populate environment configuration for deployments, to store docker registry auth information or tls secrets.&lt;/p&gt;
+
+&lt;p&gt;The typical workflow to decode a secret without &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;view-secret&lt;/code&gt; looks as follows:&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;kubectl get secret &amp;lt;secret&amp;gt; -o yaml&lt;/code&gt;&lt;/li&gt;
+  &lt;li&gt;Copy base64 encoded secret&lt;/li&gt;
+  &lt;li&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;echo &quot;b64string&quot; | base64 -d&lt;/code&gt;&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;This gets quite cumbersome especially if you just want to check the entirety of a secret to see if everything looks ok.
+There are solutions like &lt;a href=&quot;https://github.com/mveritym/kubedecode&quot;&gt;kubedecode&lt;/a&gt; or the previous &lt;a href=&quot;https://github.com/ahmetb/kubectl-extras/tree/master/view-secret&quot;&gt;view-secret&lt;/a&gt; implementation that aim at solving this problem but lack either native &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;kubectl&lt;/code&gt; integration, are outdated/not maintained anymore or require you to always provide e.g. the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;namespace&lt;/code&gt; as a parameter.&lt;/p&gt;
+
+&lt;p&gt;So I went ahead and created a new implementation for &lt;a href=&quot;https://github.com/elsesiy/kubectl-view-secret&quot;&gt;view-secret&lt;/a&gt; that is backward-compatible to the existing implementation but also adds a new capability, namely decoding all contents of a secret. My contribution has been &lt;a href=&quot;https://github.com/kubernetes-sigs/krew-index/pull/287&quot;&gt;accepted&lt;/a&gt; and the plugin is available now, so let me walk you through the process.&lt;/p&gt;
+
+&lt;p&gt;As it turns out, creating your own plugin is super simple and well documented &lt;a href=&quot;https://github.com/kubernetes-sigs/krew/blob/master/docs/DEVELOPER_GUIDE.md&quot;&gt;here&lt;/a&gt;. All you have to do is create a binary with the prefix &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;kubectl-&lt;/code&gt;, make it executable and place it somewhere in your &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;$PATH&lt;/code&gt;. A sample plugin can be as easy as this:&lt;/p&gt;
+
+&lt;div class=&quot;language-bash highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;c&quot;&gt;# kubectl-hello plugin&lt;/span&gt;
+&lt;span class=&quot;nb&quot;&gt;cat&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&quot;no&quot;&gt;EOF&lt;/span&gt;&lt;span class=&quot;sh&quot;&gt; &amp;gt; kubectl-hello
+#!/usr/bin/env bash
+echo &quot;hello from krew&quot;
+&lt;/span&gt;&lt;span class=&quot;no&quot;&gt;EOF
+
+&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;# Make executable&lt;/span&gt;
+&lt;span class=&quot;nb&quot;&gt;chmod&lt;/span&gt; +x kubectl-hello
+
+&lt;span class=&quot;c&quot;&gt;# Copy into some $PATH location&lt;/span&gt;
+&lt;span class=&quot;nb&quot;&gt;cp &lt;/span&gt;kubectl-hello /usr/local/bin
+
+&lt;span class=&quot;c&quot;&gt;# Run plugin&lt;/span&gt;
+kubectl hello
+&lt;span class=&quot;c&quot;&gt;## prints &quot;hello from krew&quot;&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;Since my language of choice for this project was Go, I created a new project and added integrations such as &lt;a href=&quot;https://goreleaser.com/&quot;&gt;GoReleaser&lt;/a&gt; to simplify shipping the binary for mulitple platforms and &lt;a href=&quot;https://travis-ci.com/&quot;&gt;Travis CI&lt;/a&gt; to automate running builds/creating releases. To simplify the build/test process I also added a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Makefile&lt;/code&gt;.
+At this point my project repo had the following layout:&lt;/p&gt;
+
+&lt;div class=&quot;language-bash highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;cmd
+  kubectl-view-secret.go
+pkg
+  cmd
+    view-secret.go
+    view-secret_test.go
+go.mod
+go.sum
+.goreleaser.yml
+.travis.yml
+Makefile
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;The established workflow was pretty straight-forward:&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;push changes to master –&amp;gt; triggers travis to run tests&lt;/li&gt;
+  &lt;li&gt;tag commit –&amp;gt; triggers travis to use goreleaser&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;I previously &lt;a href=&quot;/blog/containerization-of-golang-applications&quot;&gt;wrote&lt;/a&gt; about the usage of &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Makefile&lt;/code&gt;s in Go projects but for this project the targets are much simpler:&lt;/p&gt;
+
+&lt;div class=&quot;language-bash highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;SOURCES :&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;si&quot;&gt;$(&lt;/span&gt;shell find &lt;span class=&quot;nb&quot;&gt;.&lt;/span&gt; &lt;span class=&quot;nt&quot;&gt;-name&lt;/span&gt; &lt;span class=&quot;s1&quot;&gt;'*.go'&lt;/span&gt;&lt;span class=&quot;si&quot;&gt;)&lt;/span&gt;
+BINARY :&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; kubectl-view-secret
+
+build: kubectl-view-secret
+
+&lt;span class=&quot;nb&quot;&gt;test&lt;/span&gt;: &lt;span class=&quot;si&quot;&gt;$(&lt;/span&gt;SOURCES&lt;span class=&quot;si&quot;&gt;)&lt;/span&gt;
+  go &lt;span class=&quot;nb&quot;&gt;test&lt;/span&gt; &lt;span class=&quot;nt&quot;&gt;-v&lt;/span&gt; &lt;span class=&quot;nt&quot;&gt;-short&lt;/span&gt; &lt;span class=&quot;nt&quot;&gt;-race&lt;/span&gt; &lt;span class=&quot;nt&quot;&gt;-timeout&lt;/span&gt; 30s ./...
+
+&lt;span class=&quot;si&quot;&gt;$(&lt;/span&gt;BINARY&lt;span class=&quot;si&quot;&gt;)&lt;/span&gt;: &lt;span class=&quot;si&quot;&gt;$(&lt;/span&gt;SOURCES&lt;span class=&quot;si&quot;&gt;)&lt;/span&gt;
+  &lt;span class=&quot;nv&quot;&gt;CGO_ENABLED&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;0 go build &lt;span class=&quot;nt&quot;&gt;-o&lt;/span&gt; &lt;span class=&quot;si&quot;&gt;$(&lt;/span&gt;BINARY&lt;span class=&quot;si&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;nt&quot;&gt;-ldflags&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;-s -w&quot;&lt;/span&gt; ./cmd/&lt;span class=&quot;si&quot;&gt;$(&lt;/span&gt;BINARY&lt;span class=&quot;si&quot;&gt;)&lt;/span&gt;.go
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;For the actual implementation I used &lt;a href=&quot;https://github.com/spf13/cobra&quot;&gt;spf13/cobra&lt;/a&gt; to parse flags and process user input. To get the secret contents I use &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;exec.Command&lt;/code&gt; thus shelling out to the OS instead of using the kubernetes &lt;a href=&quot;https://github.com/kubernetes/client-go&quot;&gt;go client&lt;/a&gt; or &lt;a href=&quot;https://github.com/kubernetes/cli-runtime&quot;&gt;cli runtime&lt;/a&gt; as they add a huge overhead for such a small functionality.&lt;/p&gt;
+
+&lt;p&gt;After I finished the implementation, all I had to do was update the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;plugins/view-secret.yaml&lt;/code&gt; spec in the krew index to &lt;a href=&quot;https://github.com/kubernetes-sigs/krew-index/pull/287&quot;&gt;use my new plugin&lt;/a&gt;. This meant changing the plugin description, the download links for the new binaries and the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;sha256&lt;/code&gt; checksums. Once the Pull Request got merged, the local plugin index had to be updated via &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;kubectl krew update&lt;/code&gt; and the plugin can be installed via &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;kubectl krew install view-secret&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;Now the workflow to decode secrets is as simple as this:&lt;/p&gt;
+
+&lt;div class=&quot;language-bash highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;c&quot;&gt;# print secret keys&lt;/span&gt;
+kubectl view-secret &amp;lt;secret&amp;gt;
+
+&lt;span class=&quot;c&quot;&gt;# decode specific entry&lt;/span&gt;
+kubectl view-secret &amp;lt;secret&amp;gt; &amp;lt;key&amp;gt;
+
+&lt;span class=&quot;c&quot;&gt;# decode all secret contents&lt;/span&gt;
+kubectl view-secret &amp;lt;secret&amp;gt; &lt;span class=&quot;nt&quot;&gt;-a&lt;/span&gt;/--all
+
+&lt;span class=&quot;c&quot;&gt;# print keys for secret in different namespace&lt;/span&gt;
+kubectl view-secret &amp;lt;secret&amp;gt; &lt;span class=&quot;nt&quot;&gt;-n&lt;/span&gt;/--namespace foo
+
+&lt;span class=&quot;c&quot;&gt;# suppress info output&lt;/span&gt;
+kubectl view-secret &amp;lt;secret&amp;gt; &lt;span class=&quot;nt&quot;&gt;-q&lt;/span&gt;/--quiet
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;This was my first &lt;a href=&quot;https://www.cncf.io/&quot;&gt;CNCF&lt;/a&gt; contribution &amp;amp; I’m happy about the feedback I got from &lt;a href=&quot;https://github.com/ahmetb&quot;&gt;@ahmetb&lt;/a&gt; &amp;amp; &lt;a href=&quot;https://github.com/corneliusweig&quot;&gt;@corneliusweig&lt;/a&gt; throughout the process.&lt;/p&gt;
+
+&lt;p&gt;The full plugin code is available on &lt;a href=&quot;https://github.com/elsesiy/kubectl-view-secret&quot;&gt;GitHub&lt;/a&gt;.&lt;/p&gt;
+
+&lt;p&gt;Thanks for reading! As always please reach out if you have any questions. :wave:&lt;/p&gt;</content><author><name></name></author><category term="krew" /><category term="kubectl" /><category term="plugin" /><category term="kubernetes" /><category term="k8s" /><category term="cncf" /><category term="hacktoberfest" /><summary type="html">Hacktoberfest is almost over but since there’re plenty of opportunities to contribute, I decided to take over the task of re-writing a kubectl plugin called view-secret. For those of you who are not familar with kubectl, it’s the CLI tool to work with Kubernetes. In this post I’d like to shed some light on krew and what’s necessary to create your very own plugin. Okay, so what’s krew?</summary></entry><entry><title type="html">Kubernetes: oauth2_proxy with dynamic callback urls</title><link href="https://elsesiy.com/blog/oauth2-proxy-dynamic-callback-urls" rel="alternate" type="text/html" title="Kubernetes: oauth2_proxy with dynamic callback urls" /><published>2019-04-07T00:00:00+00:00</published><updated>2019-04-07T00:00:00+00:00</updated><id>https://elsesiy.com/blog/oauth2-proxy-dynamic-callback-urls</id><content type="html" xml:base="https://elsesiy.com/blog/oauth2-proxy-dynamic-callback-urls">&lt;p&gt;We all love the simplicity of deploying applications on Kubernetes and while many tutorials out there help you get started quickly and provide a great resource for many, some of them spare important details. In this post, I try to &lt;a href=&quot;https://github.com/pusher/oauth2_proxy/issues/109&quot;&gt;help&lt;/a&gt; the community by providing a small guide on how to deploy &lt;a href=&quot;https://github.com/pusher/oauth2_proxy&quot;&gt;oauth2_proxy&lt;/a&gt; with dynamic callback urls. But first, what is oauth2_proxy and which problem does it solve?&lt;/p&gt;
+
+&lt;p&gt;The &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;README.md&lt;/code&gt; explains it as follows:&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;A reverse proxy and static file server that provides authentication using Providers (Google, GitHub, and others) to validate accounts by email, domain or group.
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;Okay great, so this tool comes in handy if you want to authenticate users for an application that doesn’t offer authentication by itself. Famous examples include the &lt;a href=&quot;https://github.com/kubernetes/dashboard&quot;&gt;Kubernetes dashboard&lt;/a&gt;, &lt;a href=&quot;https://github.com/prometheus/prometheus&quot;&gt;Prometheus&lt;/a&gt; or &lt;a href=&quot;https://github.com/prometheus/alertmanager&quot;&gt;Alertmanager&lt;/a&gt;.&lt;/p&gt;
+
+&lt;p&gt;There are multiple ways to solve the issue of serving apps that don’t offer authentication out-of-the-box:&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;Don’t expose it at all and just browse it using &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;kubectl port-forward&lt;/code&gt;. This way, the application is never publicly exposed on the internet.&lt;/li&gt;
+  &lt;li&gt;Expose it and handle authentication in a proxy sitting in front of the application using &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;oauth2_proxy&lt;/code&gt; via existing providers (Microsoft, GitHub, etc.).&lt;/li&gt;
+  &lt;li&gt;Establish your own (federated) idendity provider to handle user authentication using i.e. &lt;a href=&quot;https://github.com/dexidp/dex&quot;&gt;dex&lt;/a&gt;.&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;!--more--&gt;
+&lt;p&gt;For the first option everyone who needs access to these tools need cluster access, so this is not a very flexible option. The second option is definitely more interesting because we can safely expose the applications on the public internet without much effort. The third option offer the most flexiblity but is a bit of an overkill for what I’m trying to achieve. Hence, I’ll be focusing on No. 2. But we might not want to have mulitple proxies in place which handle authentication independently for the respective app but rather a single instance that can be used by all apps. Let’s go through an example:&lt;/p&gt;
+
+&lt;p&gt;I want to expose Alertmananger and Prometheus to the same group of people and they should be able to seemlessly switch between the applications without the need to sign-in again.&lt;/p&gt;
+
+&lt;p&gt;First, I’ll be using helm to install the chart for &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;oauth2_proxy&lt;/code&gt; and setting some custom properties which I need for the OAuth2 provider of my choice:&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;helm install stable/oauth2-proxy --name login-oauth2-proxy \
+--namespace xyz \
+--set config.clientID=&quot;${CLIENT_ID}&quot; \
+--set config.clientSecret=&quot;${CLIENT_SECRET}&quot; \
+--set config.cookieSecret=&quot;${COOKIE_SECRET}&quot; \
+--set extraArgs.provider=&quot;azure&quot; \
+--set extraArgs.azure-tenant=&quot;${AZURE_TENANT_ID}&quot; \
+--set extraArgs.whitelist-domain=&quot;.mydomain.com&quot; \
+--set extraArgs.cookie-domain=&quot;.mydomain.com&quot; \
+--tls
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;clientID&lt;/code&gt;, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;clientSecret&lt;/code&gt; and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;azure-tenant&lt;/code&gt; can be obtained upon registering the application for Azure Active Directory integration as described &lt;a href=&quot;https://docs.microsoft.com/en-us/azure/active-directory/develop/howto-create-service-principal-portal#create-an-azure-active-directory-application&quot;&gt;here&lt;/a&gt;. To restrict access to only a subset of users from the Active Directory make sure to follow &lt;a href=&quot;https://docs.microsoft.com/en-us/azure/active-directory/develop/howto-restrict-your-app-to-a-set-of-users&quot;&gt;these instructions&lt;/a&gt; after. It’s important to register the url of the ingress rule that will be used for authentication (see below), in my case &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;https://login.mydomain.com/oauth2/callback&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;The &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;cookieSecret&lt;/code&gt; is just a random secret that can be generated with a simple python script.&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;docker run -ti --rm python:3-alpine python -c 'import secrets,base64; print(base64.b64encode(base64.b64encode(secrets.token_bytes(16))));'
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;Worth mentioning are the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;whilelist-domain&lt;/code&gt; and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;cookie-domain&lt;/code&gt; flags which should point to the parent domain of the applications to be protected, i.e.&lt;br /&gt;
+You want to protect &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;prom.mydomain.com&lt;/code&gt; and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;alerts.mydomain.com&lt;/code&gt; then this needs to be set to &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;.mydomain.com&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;Great, now we need an ingress route that handles authentication via the proxy we just deployed. This looks as simple as this:&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: login-ingress-oauth2
+  namespace: xyz
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+  - host: login.mydomain.com
+    http:
+      paths:
+      - backend:
+          serviceName: login-oauth2-proxy
+          servicePort: 80
+        path: /oauth2
+  tls:
+  - hosts:
+    - login.mydomain.com
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;Now all we have to do for the application that should be protected via our proxy is to use the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;auth-url&lt;/code&gt; and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;auth-signin&lt;/code&gt; annotations of nginx and have them reference this ingress route.&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: alertmanager-ingress
+  namespace: tiller
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/auth-url: &quot;https://login.mydomain.com/oauth2/auth&quot;
+    nginx.ingress.kubernetes.io/auth-signin: &quot;https://login.mydomain.com/oauth2/start?rd=https://$host$request_uri&quot;
+spec:
+  rules:
+  - host: alerts.mydomain.com
+    http:
+      paths:
+      - backend:
+          serviceName: prom-prometheus-operator-alertmanager
+          servicePort: 9093
+        path: /
+  tls:
+  - hosts:
+    - alerts.mydomain.com
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;Browsing &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;alerts.mydomain.com&lt;/code&gt; will redirect to the microsoft login and after successful authentication back to the application. If you deploy multiple application using this method you won’t have to login again as the consent has been granted already and a valid cookie exists.&lt;/p&gt;
+
+&lt;p&gt;A few things to be mentioned:&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;Depending on how many applications rely on the proxy, you might want to scale the oauth2_proxy deployment to ensure availability&lt;/li&gt;
+  &lt;li&gt;None of the explanations above indicate that you shouldn’t be taking care of proper RBAC rules in your cluster and restrict access to the applications according to the principle of least privilege.&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;That’s it for now, please reach out if you have further questions or remarks. Happy Sunday!&lt;/p&gt;</content><author><name></name></author><category term="oauth2_proxy" /><category term="nginx" /><category term="sso" /><category term="single sign-on" /><category term="reverse proxy" /><category term="nginx" /><category term="kubernetes" /><summary type="html">We all love the simplicity of deploying applications on Kubernetes and while many tutorials out there help you get started quickly and provide a great resource for many, some of them spare important details. In this post, I try to help the community by providing a small guide on how to deploy oauth2_proxy with dynamic callback urls. But first, what is oauth2_proxy and which problem does it solve?</summary></entry><entry><title type="html">Containerization of Golang applications</title><link href="https://elsesiy.com/blog/containerization-of-golang-applications" rel="alternate" type="text/html" title="Containerization of Golang applications" /><published>2019-01-09T00:00:00+00:00</published><updated>2019-01-09T00:00:00+00:00</updated><id>https://elsesiy.com/blog/containerization-of-golang-applications</id><content type="html" xml:base="https://elsesiy.com/blog/containerization-of-golang-applications">&lt;p&gt;I’ve been a working a lot in &lt;a href=&quot;https://golang.org/&quot;&gt;Golang&lt;/a&gt; recently and even though it easily allows for single static binary compilation I find myself using &lt;a href=&quot;https://www.docker.com/&quot;&gt;Docker&lt;/a&gt; a lot. Why? Well, especially when it comes to container orchestration and scaling of workloads some sort of container technology is used as these build the foundation of a Pod in &lt;a href=&quot;https://kubernetes.io/&quot;&gt;Kubernetes&lt;/a&gt; (our deployment infrastructure).&lt;/p&gt;
+
+&lt;p&gt;While coming up with an initial Dockerfile is easy, correctly compiling a Go application and adhere to all sorts of container best practices is still hard. Does the size of the binary matter? If so, you might want to provide some additional flags during compilation. 
+Do you build the app outside of the container and just copy the final artifact into it or do you use multi-stage builds to have everything within an isolated environment? How do you deal with caching of layers? How do you make sure that the final container is secure and only contains whatever is needed to execute your application? 
+&lt;!--more--&gt;
+The first thing I was overwhelmed with is how much old information is still out there and that even well-known developers such as &lt;a href=&quot;http://www.hockin.org/~thockin/&quot;&gt;Tim Hockin&lt;/a&gt; (co-creator of Kubernetes) are having &lt;a href=&quot;https://twitter.com/thockin/status/758814480931229697?lang=en&quot;&gt;questions&lt;/a&gt; on how to actually compile a Golang application &lt;em&gt;correctly&lt;/em&gt;. As it turns out, some flags are &lt;a href=&quot;https://plus.google.com/117192131596509381660/posts/eNnNePihYnK&quot;&gt;strictly unnecessary&lt;/a&gt; as of Go 1.10 but are still widely used. Ultimately, it all depends on your needs and whether you need &lt;a href=&quot;https://golang.org/cmd/cgo/&quot;&gt;cgo&lt;/a&gt; or not but even after studying a lot of blog posts I’m still not 100% sure about my approach. As it turns out, Tim created a nice &lt;a href=&quot;https://github.com/thockin/go-build-template&quot;&gt;skeleton project&lt;/a&gt; which is a good starting point in my opinion.&lt;/p&gt;
+
+&lt;p&gt;Furthermore, I saw a lot of different approaches in terms of runtime base image and how the build process takes place. Some are using for &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;golang:alpine&lt;/code&gt; with manually installing ca-certs, tzinfo, etc. during the build stage whereas others use plain &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;golang&lt;/code&gt; instead. For the final stage common choices are either &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;scratch&lt;/code&gt; or &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;alpine&lt;/code&gt; which still provide a larger attack surface than i.e. &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;gcr.io/distroless/base&lt;/code&gt;. As with many things, there’s not a single &lt;em&gt;correct&lt;/em&gt; approach because one might want to keep the ability to &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;docker exec -it&lt;/code&gt; into a container around whereas others have better ways to debug their services.&lt;/p&gt;
+
+&lt;p&gt;While coming up with my current solution I had the following considerations to take into account. Local development should still be fast, the build process must be CI-friendly with clean &amp;amp; reproduceable builds and no additional tooling needed to secure the final image such as &lt;a href=&quot;https://github.com/aquasecurity/microscanner&quot;&gt;microscanner&lt;/a&gt; or &lt;a href=&quot;https://github.com/coreos/clair&quot;&gt;clair&lt;/a&gt;. Hence, I created a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Makefile&lt;/code&gt; that helps me take care of the heavy lifting and allows for fast local development where no Docker is used at all. A shortened &amp;amp; simplified version looks as follows:&lt;/p&gt;
+
+&lt;div class=&quot;language-make highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;nv&quot;&gt;OUT&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;:=&lt;/span&gt; binary-name
+&lt;span class=&quot;nv&quot;&gt;PKG&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;:=&lt;/span&gt; github.com/package
+&lt;span class=&quot;nv&quot;&gt;VERSION&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;:=&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;$(&lt;/span&gt;&lt;span class=&quot;nb&quot;&gt;shell&lt;/span&gt; git describe &lt;span class=&quot;nt&quot;&gt;--always&lt;/span&gt; &lt;span class=&quot;nt&quot;&gt;--dirty&lt;/span&gt;&lt;span class=&quot;nf&quot;&gt;)&lt;/span&gt;
+&lt;span class=&quot;nv&quot;&gt;PKG_LIST&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;:=&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;$(&lt;/span&gt;&lt;span class=&quot;nb&quot;&gt;shell&lt;/span&gt; go list &lt;span class=&quot;nv&quot;&gt;${PKG}&lt;/span&gt;/...&lt;span class=&quot;nf&quot;&gt;)&lt;/span&gt;
+&lt;span class=&quot;nv&quot;&gt;GO_FILES&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;:=&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;$(&lt;/span&gt;&lt;span class=&quot;nb&quot;&gt;shell&lt;/span&gt; find &lt;span class=&quot;nb&quot;&gt;.&lt;/span&gt; &lt;span class=&quot;nt&quot;&gt;-name&lt;/span&gt; &lt;span class=&quot;s1&quot;&gt;'*.go'&lt;/span&gt;&lt;span class=&quot;nf&quot;&gt;)&lt;/span&gt;
+
+&lt;span class=&quot;nl&quot;&gt;build&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;:&lt;/span&gt;
+	go build &lt;span class=&quot;nt&quot;&gt;-i&lt;/span&gt; &lt;span class=&quot;nt&quot;&gt;-v&lt;/span&gt; &lt;span class=&quot;nt&quot;&gt;-o&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;${OUT}&lt;/span&gt; &lt;span class=&quot;nt&quot;&gt;-ldflags&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;-X main.version=&lt;/span&gt;&lt;span class=&quot;nv&quot;&gt;${VERSION}&lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;${PKG}&lt;/span&gt;
+
+&lt;span class=&quot;nl&quot;&gt;test&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;:&lt;/span&gt;
+	&lt;span class=&quot;p&quot;&gt;@&lt;/span&gt;go &lt;span class=&quot;nb&quot;&gt;test&lt;/span&gt; &lt;span class=&quot;nt&quot;&gt;-short&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;${PKG_LIST}&lt;/span&gt;
+
+&lt;span class=&quot;nl&quot;&gt;vet&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;:&lt;/span&gt;
+	&lt;span class=&quot;p&quot;&gt;@&lt;/span&gt;go vet &lt;span class=&quot;nv&quot;&gt;${PKG_LIST}&lt;/span&gt;
+
+&lt;span class=&quot;nl&quot;&gt;errorcheck&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;:&lt;/span&gt;
+	&lt;span class=&quot;p&quot;&gt;@&lt;/span&gt;errcheck &lt;span class=&quot;nv&quot;&gt;${PKG_LIST}&lt;/span&gt;
+
+&lt;span class=&quot;nl&quot;&gt;lint&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;:&lt;/span&gt;
+	&lt;span class=&quot;p&quot;&gt;@&lt;/span&gt;&lt;span class=&quot;k&quot;&gt;for &lt;/span&gt;file &lt;span class=&quot;k&quot;&gt;in&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;${GO_FILES}&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;  &lt;span class=&quot;k&quot;&gt;do&lt;/span&gt; &lt;span class=&quot;se&quot;&gt;\&lt;/span&gt;
+		golint &lt;span class=&quot;nv&quot;&gt;$$&lt;/span&gt;file &lt;span class=&quot;p&quot;&gt;;&lt;/span&gt; &lt;span class=&quot;se&quot;&gt;\&lt;/span&gt;
+	&lt;span class=&quot;k&quot;&gt;done&lt;/span&gt;
+
+&lt;span class=&quot;nl&quot;&gt;container&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;:&lt;/span&gt;
+	&lt;span class=&quot;p&quot;&gt;@&lt;/span&gt;docker build &lt;span class=&quot;nt&quot;&gt;--build-arg&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;VERSION&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;nv&quot;&gt;${VERSION}&lt;/span&gt; &lt;span class=&quot;nt&quot;&gt;-t&lt;/span&gt; registry/image:&lt;span class=&quot;nv&quot;&gt;${VERSION}&lt;/span&gt; .
+
+&lt;span class=&quot;nl&quot;&gt;container-push&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;:&lt;/span&gt;
+	&lt;span class=&quot;p&quot;&gt;@&lt;/span&gt;docker push registry/image:&lt;span class=&quot;nv&quot;&gt;${VERSION}&lt;/span&gt;
+
+&lt;span class=&quot;nl&quot;&gt;run&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;build&lt;/span&gt;
+	./&lt;span class=&quot;nv&quot;&gt;${OUT}&lt;/span&gt;
+
+&lt;span class=&quot;nl&quot;&gt;clean&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;:&lt;/span&gt;
+	&lt;span class=&quot;p&quot;&gt;-&lt;/span&gt;@rm &lt;span class=&quot;nv&quot;&gt;${OUT}&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;${OUT}&lt;/span&gt;-&lt;span class=&quot;k&quot;&gt;*&lt;/span&gt;
+
+&lt;span class=&quot;nl&quot;&gt;.PHONY&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;run build vet lint errorcheck&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;I’ll talk about &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;-ldflags&lt;/code&gt; in a bit, so don’t worry about it for now. Since the regular &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;go build&lt;/code&gt; command doesn’t do static analysis on the project files, I created steps like &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;vet&lt;/code&gt; (checks for correctness/suspicious constructs), &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;lint&lt;/code&gt; (style mistakes) and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;errorcheck&lt;/code&gt; (missing error handling) I can run whenever I feel like it. This is not done implicitly through another step such as &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;build&lt;/code&gt; because my CI system takes care of these things too. The rest of the file should be self-explanatory if you’re familiar with make.&lt;br /&gt;
+Now, the following &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Dockerfile&lt;/code&gt; is only used in my CI system for which I don’t mind it to fetch the dependencies during each build.&lt;/p&gt;
+
+&lt;div class=&quot;language-docker highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;c&quot;&gt;# Build stage&lt;/span&gt;
+&lt;span class=&quot;k&quot;&gt;FROM&lt;/span&gt;&lt;span class=&quot;s&quot;&gt; golang:1.11.4 AS build-env&lt;/span&gt;
+
+&lt;span class=&quot;k&quot;&gt;LABEL&lt;/span&gt;&lt;span class=&quot;s&quot;&gt; maintainer=&quot;Jonas-Taha El Sesiy &amp;lt;github@elsesiy.com&amp;gt;&quot;&lt;/span&gt;
+
+&lt;span class=&quot;k&quot;&gt;WORKDIR&lt;/span&gt;&lt;span class=&quot;s&quot;&gt; /project&lt;/span&gt;
+&lt;span class=&quot;k&quot;&gt;ARG&lt;/span&gt;&lt;span class=&quot;s&quot;&gt; VERSION&lt;/span&gt;
+&lt;span class=&quot;k&quot;&gt;COPY&lt;/span&gt;&lt;span class=&quot;s&quot;&gt; main.go go.mod go.sum ./&lt;/span&gt;
+&lt;span class=&quot;k&quot;&gt;RUN &lt;/span&gt;bash &lt;span class=&quot;nt&quot;&gt;-c&lt;/span&gt; &lt;span class=&quot;s2&quot;&gt;&quot;go get -d &amp;amp;&amp;gt; /dev/null&quot;&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;amp;&amp;amp;&lt;/span&gt; &lt;span class=&quot;se&quot;&gt;\
+&lt;/span&gt;    &lt;span class=&quot;nv&quot;&gt;CGO_ENABLED&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;0 &lt;span class=&quot;nv&quot;&gt;GOOS&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;linux go build &lt;span class=&quot;nt&quot;&gt;-ldflags&lt;/span&gt; &lt;span class=&quot;s2&quot;&gt;&quot;-X main.version=&lt;/span&gt;&lt;span class=&quot;k&quot;&gt;${&lt;/span&gt;&lt;span class=&quot;nv&quot;&gt;VERSION&lt;/span&gt;&lt;span class=&quot;k&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;s2&quot;&gt; -s -w&quot;&lt;/span&gt; &lt;span class=&quot;nt&quot;&gt;-a&lt;/span&gt; &lt;span class=&quot;nt&quot;&gt;-o&lt;/span&gt; app .
+
+&lt;span class=&quot;c&quot;&gt;# Final stage&lt;/span&gt;
+&lt;span class=&quot;k&quot;&gt;FROM&lt;/span&gt;&lt;span class=&quot;s&quot;&gt; gcr.io/distroless/base&lt;/span&gt;
+&lt;span class=&quot;k&quot;&gt;COPY&lt;/span&gt;&lt;span class=&quot;s&quot;&gt; --from=build-env /project/app .&lt;/span&gt;
+&lt;span class=&quot;k&quot;&gt;CMD&lt;/span&gt;&lt;span class=&quot;s&quot;&gt; [&quot;./app&quot;]&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;I’m using multi-stage builds with the latest Golang version as the base image. For the final stage, I opted for &lt;a href=&quot;https://github.com/GoogleContainerTools/distroless#why-should-i-use-distroless-images&quot;&gt;distroless&lt;/a&gt; even though the final image is &lt;strong&gt;bigger&lt;/strong&gt; than the other choices. Note that I’m using go modules for dependency management introduced in Go 1.11 for which I copy the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;go.mod&lt;/code&gt; and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;go.sum&lt;/code&gt; files into the container.&lt;br /&gt;
+As mentioned before, there are a couple of flags passed onto the go compiler via &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;-ldflags&lt;/code&gt;. &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;-X main.version=abc&lt;/code&gt; allows me to pass on the version information to the binary which is then used within the app in some fashion. &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;-s -w&lt;/code&gt; disables the symbol table and the generation of debug data in form of DWARF in order to reduce the size of the binary which is useful for my production image.&lt;/p&gt;
+
+&lt;p&gt;This is just my take on this. If you have suggestions for improvements or any other remarks, please reach out. Thanks! :wave:&lt;/p&gt;</content><author><name></name></author><category term="docker" /><category term="container" /><category term="golang" /><category term="go" /><summary type="html">I’ve been a working a lot in Golang recently and even though it easily allows for single static binary compilation I find myself using Docker a lot. Why? Well, especially when it comes to container orchestration and scaling of workloads some sort of container technology is used as these build the foundation of a Pod in Kubernetes (our deployment infrastructure).</summary></entry><entry><title type="html">DV lottery - What is that?, Part 3</title><link href="https://elsesiy.com/blog/dv-lottery-part-3" rel="alternate" type="text/html" title="DV lottery - What is that?, Part 3" /><published>2018-09-19T00:00:00+00:00</published><updated>2018-09-19T00:00:00+00:00</updated><id>https://elsesiy.com/blog/dv-lottery-part-3</id><content type="html" xml:base="https://elsesiy.com/blog/dv-lottery-part-3">&lt;p&gt;Alright, this is the last part of the series on the ins and outs of the DV lottery. If you haven’t read the previous articles already, make sure to find out everything about the interview process in the &lt;a href=&quot;/blog/dv-lottery-part-1&quot;&gt;first part&lt;/a&gt; and the some of the initial actions to take arriving in the country if you’re among the lucky ones in the &lt;a href=&quot;/blog/dv-lottery-part-2&quot;&gt;second part&lt;/a&gt;.&lt;br /&gt;
+In this part, I’ll be talking about getting a driver’s license, job search, and international travel as a resident (how to keep your status as a resident).&lt;/p&gt;
+
+&lt;h3 id=&quot;drivers-license&quot;&gt;Driver’s license&lt;/h3&gt;
+&lt;p&gt;As a newcomer to a foreign country you’re required to operate a vehicle at some point in time. If I think about my time as a tourist in the US it was easy as many states allow driving with a foreign driver’s license up to three months. Well, if you’re on an immigrant visa it’s different. In California where I live, the law says you’re only allowed to use a foreign license for 10 days if there’s an immigration intent. In crowded places like the San Fransisco Bay Area it’s almost impossible to get an appointment that fast.&lt;br /&gt;
+If you’re hoping for a clear guidance on what to do in this case - I don’t have it. &lt;!--more--&gt;Some people keep driving with their foreign license, some people use any of the available car sharing services to get around. The good thing is though, that once you passed the knowledge test you’re allowed to drive if someone at the age of 25 who owns a valid driver’s license accompanies you. This should help you to familarize yourself with your new environment and lets you practice for your driving test. For me the whole process took about 3 month and cost 35$.&lt;/p&gt;
+
+&lt;p&gt;&lt;strong&gt;Note:&lt;/strong&gt; The US driver’s license is much more than just a license. It’s commonly used for age checks and serves as a valid travel document for domestic flights. Starting October 1st, 2020, boarding domestic flights requires the ownership of a REAL ID driver’s license or ID card. More info on this can be found &lt;a href=&quot;https://www.dmv.ca.gov/portal/dmv/detail/realid&quot;&gt;here&lt;/a&gt;.&lt;/p&gt;
+
+&lt;h3 id=&quot;finding-a-job&quot;&gt;Finding a job&lt;/h3&gt;
+&lt;p&gt;Even though becoming a US resident doesn’t mean you have to work for a US company or work at all but I assume that most of us need to make a living somehow so getting a job was one of my major concerns. Unfortunately, there’s no general rule of thumb I can provide you with because finding a job is strongly dependent on the industry you are operating in. For me applying through i.e. glassdoor wasn’t successful at all but instead going to Meetups and meeting people in person worked pretty well. I read that only a fraction of available jobs is being posted online and networking is so much more important than I was used to it from Europe. In general, I’d suggest at least 3 months in which one can settle and interview with a lot of companies to find a good job.&lt;/p&gt;
+
+&lt;h3 id=&quot;travel&quot;&gt;Travel&lt;/h3&gt;
+&lt;p&gt;The article is getting quite long already but this is an important part, so bear with me. A big topic is travelling internationally as a resident as you’re supposed to be in the US. Nonetheless, having vacation and staying away for a couple of weeks is usually not an issue. If you can provide documentation that you’re actually living in the US and justify your trip, there’s nothing to worry about even with frequent travels. But if you plan on staying away longer than one year then you must apply for a &lt;a href=&quot;https://www.uscis.gov/sites/default/files/USCIS/Resources/B5en.pdf&quot;&gt;reentry permit&lt;/a&gt; as your permanent resident card becomes technically invalid after this period.&lt;/p&gt;
+
+&lt;p&gt;A topic I haven’t covered here is the process of naturalization which means becoming a citizen. As I have yet to explore this myself, I can only point you to the &lt;a href=&quot;https://www.uscis.gov/citizenship/educators/naturalization-information&quot;&gt;official website&lt;/a&gt;.&lt;/p&gt;
+
+&lt;p&gt;This was the last part on the topic for now, please reach out if you have any questions or remarks!&lt;/p&gt;</content><author><name></name></author><category term="diversity visa" /><category term="green card" /><category term="lottery" /><category term="USA" /><summary type="html">Alright, this is the last part of the series on the ins and outs of the DV lottery. If you haven’t read the previous articles already, make sure to find out everything about the interview process in the first part and the some of the initial actions to take arriving in the country if you’re among the lucky ones in the second part. In this part, I’ll be talking about getting a driver’s license, job search, and international travel as a resident (how to keep your status as a resident).</summary></entry><entry><title type="html">DV lottery - What is that?, Part 2</title><link href="https://elsesiy.com/blog/dv-lottery-part-2" rel="alternate" type="text/html" title="DV lottery - What is that?, Part 2" /><published>2018-05-31T00:00:00+00:00</published><updated>2018-05-31T00:00:00+00:00</updated><id>https://elsesiy.com/blog/dv-lottery-part-2</id><content type="html" xml:base="https://elsesiy.com/blog/dv-lottery-part-2">&lt;p&gt;As promised back in August, I’m finally continuing my post about the DV lottery. In this part I’m going to explain how I finally got the physical green card (compared to the temporary stamp in my passport) and what else I’ve been doing the whole time. Make sure to check out the &lt;a href=&quot;/blog/dv-lottery-part-1&quot;&gt;first&lt;/a&gt; part if you haven’t read it yet.&lt;/p&gt;
+
+&lt;p&gt;After successfully going through the application process for the green card at the US embassy in Frankfurt, Germany I received my passport (with a temporary visa) and an envelope with my immigration documents. This envelope is &lt;strong&gt;sealed&lt;/strong&gt; and under no circumstance are you allowed to open it or remove anything attached to it. The temporary visa has a shortened validity depending on the date of the medical examination plus 6 months. The soon-to-be resident must immigrate to the US prior to the expiration of this visa or the medical exam has to be repeated and a new visa needs to be issued. So here’s what you need to know about the pitfalls of using this visa until you receive the final document.&lt;/p&gt;
+
+&lt;h3 id=&quot;immigration-and-green-card&quot;&gt;Immigration and Green card&lt;/h3&gt;
+&lt;p&gt;The first thing to do is of course flying out to your prospective home country and handing over the sealed envelope at any port of entry. The officer will open the envelope to make sure the documents are complete and put the info into the system. He’ll then ask you about your home address because that’s the corresponding address for the United States Citizenship and Immigration Services (&lt;a href=&quot;https://www.uscis.gov/&quot;&gt;USCIS&lt;/a&gt;) to send your green card to once you paid the issuing fee of 165$. Furthermore, he’ll welcome you to the USA :+1:. What next? Well technically nothing needs to be done at this point in time except for wait for your social security card (which should arrive within 30 days) and the green card (arrival supposedly within 120 days) in your mailbox. 
+&lt;!--more--&gt;
+In my case this totally didn’t work at all so I needed to reach out to the Social Security Administration (SSA) and manually apply for the card. Also I started to getting appointment notices for the so-called biometrics appointment at the USCIS field office located next to my home address. These notices usually don’t apply for diversity visa recipients as they have their biometrics taken already at the embassys. Even after attending one of the appointments and having my biometrics taken again, I continued receiving these notices which proved my suspicion that something is wrong. I called the USCIS multiple times and was finally able to talk to an immigration officer who didn’t know what was going on with the notices and also not why there’s such a long delay in processing my case (120 days were long overdue at this point).&lt;br /&gt;
+There was one last hope: The CIS ombudsman. The office of the ombudsman can be consulted for cases which are long overdue or in order to file complaints, etc. Two days after filing my case with them there was an update on my case (the green card has been mailed) and I closed my case with them immediately again which must be a coincidence, but usually this office is a good point of contact.&lt;br /&gt;
+Just to let you know: Once the physical green card has been sent out, the temporary visa in your passport becomes invalid. I learned it the hard way through second screening in Austin, TX but that’s a different story…&lt;/p&gt;
+
+&lt;h3 id=&quot;sim-card&quot;&gt;SIM Card&lt;/h3&gt;
+&lt;p&gt;As a German I was shocked about the prices for cellular service of any kind in the US. You can easily pay up to 70$ for unlimited data, text and voice here which is almost double the price of what I’ve been paying back in Germany but anyway…
+There are four major networks that operate in the US: AT&amp;amp;T, T-Mobile, Verizon and Sprint.
+I’m not going into detail on this any further except for this tiny remark: There’s a difference between GSM and CDMA, so make sure your phone is compatible ;)&lt;/p&gt;
+
+&lt;p&gt;Personally, I decided to go with what is called a Mobile Virtual Network Operator (MVNO). They share the frequencies of major networks (sometimes even all of them at once, i.e. Google Fi) and usually offer better deals compared to walking into the name brand stores. My MVNO is called &lt;a href=&quot;https://www.mintmobile.com/&quot;&gt;Mint&lt;/a&gt; and operates on the T-Mobile network. At times, there might be reduced speed if the network is busy since direct T-Mobile customers are preferred over MVNOs but I haven’t experienced it yet and I think it’s fair with regard to the cost benefit. A downside of MVNOs is that they usually have very few or no stores at all, so you need to order it online which can be a little inconvenient especially if you need a phone right from the beginning (i.e. to Uber home from the airport). Be sure to check the coverage maps of the network operator, no matter if MVNO or direct brand as there might be huge differences depending on your area.&lt;/p&gt;
+
+&lt;h3 id=&quot;bank-account&quot;&gt;Bank Account&lt;/h3&gt;
+&lt;p&gt;One of the first things you probably want to do is opening up a bank account. I’ve been a huge fan of online banks and looked into Simple only to find out that they’re exclusively serving US citizens. So I did some research for comparable offers and finally found Capital One to be a good alternative. They offer a great ATM network, no fees and everything is easily managed through their website or app. There are multiple types of bank accounts one can open but since I’m not here to provide financial advice by any means let’s stick with a traditional Saving’s acccount. Opening up the account is straight-forward online or through one of their very few branches across the country. All you need is an address for shipment of your card, a phone number in your name and your social security number.&lt;/p&gt;
+
+&lt;p&gt;If you apply for a credit card right away, you probably will be denied or get a very low limit on it. To build up credit, it’s best to start out with a Secured Credit Card. There’s another possibility if you happen have a credit card from an international operating institution such as American Express already in your home country. They offer to transfer your history with them and issue a new card for the US with comparable conditions as in your home country which simplifies things a lot.&lt;/p&gt;
+
+&lt;p&gt;&lt;strong&gt;Note:&lt;/strong&gt; If you try opening up the account right after your arrival, there’s probably no credit history on you in any of the systems they check against. This means they won’t be able to verify that you are an acutal person and this is why you need to have a phone number in your name. I believe the idea is that i.e. if you went to an AT&amp;amp;T store to get a SIM card, they have already seen you in person.&lt;/p&gt;
+
+&lt;h3 id=&quot;credit-history&quot;&gt;Credit history&lt;/h3&gt;
+&lt;p&gt;You’re new to the country and nobody knows about your spending habits and whether you are a reliable customer or not. Expect huge down payments and/or insane interest rates as companies try to mitigate the risk of you not paying your bills. A common approach to build up your credit without wasting huge amounts of money on interest payments is to buy everything with a credit card and pay it off in full every month prior to doing bigger investments such as getting a car or buying a house (if you can wait that long). Also make sure to put your name on the utility bills of the place where you are staying if possible which also increases your credit.&lt;/p&gt;
+
+&lt;p&gt;That’s it for now. I’ll continue in the next part on how to find a job, travel as a resident and much more, stay tuned!&lt;/p&gt;</content><author><name></name></author><category term="diversity visa" /><category term="green card" /><category term="lottery" /><category term="USA" /><summary type="html">As promised back in August, I’m finally continuing my post about the DV lottery. In this part I’m going to explain how I finally got the physical green card (compared to the temporary stamp in my passport) and what else I’ve been doing the whole time. Make sure to check out the first part if you haven’t read it yet.</summary></entry><entry><title type="html">Response to ‘Why Bitcoin is failing the Muggles’</title><link href="https://elsesiy.com/blog/response-to-why-bitcoin-is-failing-the-muggles" rel="alternate" type="text/html" title="Response to ‘Why Bitcoin is failing the Muggles’" /><published>2018-02-13T00:00:00+00:00</published><updated>2018-02-13T00:00:00+00:00</updated><id>https://elsesiy.com/blog/response-to-why-bitcoin-is-failing-the-muggles</id><content type="html" xml:base="https://elsesiy.com/blog/response-to-why-bitcoin-is-failing-the-muggles">&lt;p&gt;I recently read an &lt;a href=&quot;https://www.linkedin.com/pulse/why-bitcoin-failing-muggles-florian-gamper/&quot;&gt;article&lt;/a&gt; by &lt;a href=&quot;https://www.linkedin.com/in/floriangamper/&quot;&gt;Florian Gamper&lt;/a&gt; about how he thinks blockchain and crypto currencies - Bitcoin in particular - are failing the “muggles” - a nice reference to the average Joe taken from Harry Potter. Even though he made some valid points, I feel the need to make some clarifications.&lt;/p&gt;
+
+&lt;p&gt;In his rant, Florian starts with a short introduction and continues by expressing major concerns about 1. the environment, 2. trust, 3. security and 4. privacy. Each of these building blocks gives the reader something to think about and I’m going to stick to the scheme and comment on them sequentially. So here we go..&lt;/p&gt;
+
+&lt;h3 id=&quot;introduction&quot;&gt;Introduction&lt;/h3&gt;
+&lt;p&gt;In this part the author provides some good references for beginners and distance his writing from the current hype which led to failed ICOs and share increases through company renaming. Furthermore, he claims that &lt;em&gt;“the community”&lt;/em&gt; describes the technology as magic which leads me to believe that he either went to the wrong meetups or talked to the wrong people.&lt;/p&gt;
+
+&lt;p&gt;I do understand that for the bigger part of the society it’s incomprehensable how the tech works and yes most of them can’t tell the difference between bitcoin and blockchain. However, that doesn’t hold true for people familiar with the matter and most certainly nobody of us would call it &lt;em&gt;“magic”&lt;/em&gt; by any means. I must agree with his statement on the inflationary expectations though, as also &lt;a href=&quot;https://www.gartner.com/smarterwithgartner/top-trends-in-the-gartner-hype-cycle-for-emerging-technologies-2017/&quot;&gt;Gartner&lt;/a&gt; confirms it.
+&lt;!--more--&gt;&lt;/p&gt;
+&lt;h3 id=&quot;the-environment&quot;&gt;The Environment&lt;/h3&gt;
+&lt;p&gt;I really do care about the environment and I totally agree with all that has been said in this part. Unfortunately, the author only talked about one very well-known consensus algorithm instead of providing the reader with sufficient information on alternatives. He didn’t mention Proof of Stake, a secure and way more &lt;a href=&quot;https://coincentral.com/could-proof-of-stake-mend-bitcoins-energy-costs/&quot;&gt;environment-friendly&lt;/a&gt; protocol (most notably implemented in &lt;a href=&quot;https://github.com/ethereum/wiki/wiki/Proof-of-Stake-FAQ&quot;&gt;Ethereum’s Casper Protocol&lt;/a&gt;) which would completely undermine his argument. Also, he didn’t take improvements to the Bitcoin network through second-layer protocols such as the &lt;a href=&quot;https://en.wikipedia.org/wiki/Lightning_Network&quot;&gt;Lightening Network&lt;/a&gt; into account which would allow vastly more transactions without the need for additional hash power. If you think that’s just a glimpse in the future, you’re mistaken as both solutions are either already deployed on corresponding test networks or even had a first live &lt;a href=&quot;https://www.reddit.com/r/Bitcoin/comments/7rkunw/lightning_the_future_just_arrived_at_my_doorstep/&quot;&gt;debut&lt;/a&gt;.&lt;/p&gt;
+
+&lt;p&gt;Another issue with this part is the made-up number of 80% of nodes being in China and the false claims about where the electricity is coming from. I haven’t found any statistics on which node uses which source of energy, however, I found the acutal node distribution as of Feb, 12th 2018:&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/assets/posts/2018-02-12_Bitcoin-Node-Distribution.png&quot; alt=&quot;&quot; /&gt;&lt;/p&gt;
+
+&lt;p class=&quot;image-caption&quot;&gt;&lt;em&gt;Source: Bitnodes&lt;/em&gt;&lt;/p&gt;
+
+&lt;p&gt;There is also a whole different type of blockchain which is mostly being adopted in enterprises which use different consensus mechanisms such as Proof of Elapsed Time (PoET)  or Redundant Byzantine Fault Tolerance (RBFT) as described in the &lt;a href=&quot;https://www.hyperledger.org/wp-content/uploads/2017/08/Hyperledger_Arch_WG_Paper_1_Consensus.pdf&quot;&gt;Hyperledger Architecture Overview&lt;/a&gt;. They all consume tremendously less energy than the Proof of Work mechanism mentioned by the author.&lt;/p&gt;
+
+&lt;h3 id=&quot;trust&quot;&gt;Trust&lt;/h3&gt;
+&lt;p&gt;This was really the part when I decided to clarify things. In my opinion, the line of reasoning in this part is.. let’s put gently: questionable. Blockchain enables trustless computing through it’s various components with the ultimate goal of reaching consensus. The author argues that the trust isn’t actually trust but faith as an algorithm determines it. Even though, technically speaking he’s right, he didn’t describe what the algorithm actually does in order to reach consensus which would give the reader a chance to judge for himself how much trust vs. faith there is. I’m not going to elaborate in much detail on how the transactions are being validated either, but an integral part of it is to check all transactions that led to the sender being capable of sending a transaction at a certain point in time. In other words: Before a transaction can be made, the funds necessary for this transaction are being validated. A technical description can be found in the protocol rules of the &lt;a href=&quot;https://en.bitcoin.it/wiki/Protocol_rules#.22tx.22_messages&quot;&gt;Bitcoin Wiki&lt;/a&gt;. From my perspective, this has nothing to do with faith.&lt;/p&gt;
+
+&lt;p&gt;The next argument was “money -&amp;gt; nodes -&amp;gt; owning the chain” and a presumptious threat if China’s 4 pools would come to an agreement. Well first of all, the referenced article about mining pool distribution is 7 months old which means it’s very much outdated. Just 2 months later, exchanges and pools started to shut down or move to &lt;a href=&quot;https://www.investopedia.com/news/which-countries-benefit-chinas-crackdown-bitcoin-mining/&quot;&gt;foreign shores&lt;/a&gt; due to potential &lt;a href=&quot;https://techcrunch.com/2017/09/14/china-bitcoin-exchange-suspended-bttc-china/&quot;&gt;regulation&lt;/a&gt;. Second and more importantly, the author puts too much emphasis on the possibility of a 51% attack which even though theoretically possible and technically feasible, the damage caused is in fact comparably small as described &lt;a href=&quot;https://learncryptography.com/cryptocurrency/51-attack&quot;&gt;here&lt;/a&gt;. From an economic perspective this attack can be considered infeasable with just a small gain compared to the effort put into it and an expected sudden decline of the token value if the network is compromised.&lt;/p&gt;
+
+&lt;p&gt;In the last paragraph the author refers to “other chains” and an even bigger threat for them to be exposed to the aforementioned attack. Since he’s not stating any specific chain, I can only guess that he means any of the recent super ICO coins. In fact, many of the coins are based on the &lt;a href=&quot;https://etherscan.io/tokens&quot;&gt;Ethereum network&lt;/a&gt; and are so-called ERC-20 tokens, which would be indeed backed up by the underlying network for the exact reason of not wanting to create a new network, gain traction, build up nodes, etc.&lt;/p&gt;
+
+&lt;p&gt;Anyway, on to the next topic..&lt;/p&gt;
+
+&lt;h3 id=&quot;security&quot;&gt;Security&lt;/h3&gt;
+&lt;p&gt;In this part the author describes the pitfalls of public key cryptography and how it’s always been a challenge to safely store the private key in order to prove ownership. I do agree a lot with what’s been said and yes, storing the key in a safe place is a non-trivial task for non-technical people but for this exact reason there are plenty of &lt;a href=&quot;http://coinoutletatm.com/7-types-of-bitcoin-wallets/&quot;&gt;wallet types&lt;/a&gt; out there to increase usability without compromising security. The latest trend is the rise of so-called hardware wallets, such as &lt;a href=&quot;https://trezor.io/&quot;&gt;Trezor&lt;/a&gt; or &lt;a href=&quot;https://www.ledgerwallet.com/&quot;&gt;Ledger Nano S&lt;/a&gt;. As stated, it’s not a problem with the technology itself and at some point people need to adjust to these kinds of things in order to reach mainstream adoption. From my perspective, this is mostly the same reason why PGP didn’t reach mainstream adoption even though it should.&lt;/p&gt;
+
+&lt;h3 id=&quot;privacy&quot;&gt;Privacy&lt;/h3&gt;
+&lt;p&gt;Florian again only focusses on Bitcoin in this section but generalizes it by saying blockchain. There are alternatives to prevent the mentioned traceability (also called linkability of transactions), such as &lt;a href=&quot;https://getmonero.org/2017/04/19/an-unofficial-response-to-an-empirical-analysis-of-linkability.html&quot;&gt;Monero&lt;/a&gt;. Also, off-chain transactions haven’t been considered even though they provide enhanced privacy as they happen in private.&lt;/p&gt;
+
+&lt;h4 id=&quot;wrapping-it-up&quot;&gt;Wrapping it up&lt;/h4&gt;
+&lt;p&gt;In my opinion, the author failed to be concise enough to provide some well researched information on the topic but instead leaves the reader - me - with a lot of questionmarks and unfinished thoughts.&lt;/p&gt;
+
+&lt;p&gt;If you have any remarks, please feel free to reach out! :wave:&lt;/p&gt;</content><author><name></name></author><category term="blockchain" /><category term="crypto currency" /><category term="bitcoin" /><category term="ethereum" /><category term="consensus mechanisms" /><category term="security" /><category term="trust" /><category term="privacy" /><category term="environment" /><summary type="html">I recently read an article by Florian Gamper about how he thinks blockchain and crypto currencies - Bitcoin in particular - are failing the “muggles” - a nice reference to the average Joe taken from Harry Potter. Even though he made some valid points, I feel the need to make some clarifications.</summary></entry><entry><title type="html">DV lottery - What is that?, Part 1</title><link href="https://elsesiy.com/blog/dv-lottery-part-1" rel="alternate" type="text/html" title="DV lottery - What is that?, Part 1" /><published>2017-08-17T00:00:00+00:00</published><updated>2017-08-17T00:00:00+00:00</updated><id>https://elsesiy.com/blog/dv-lottery-part-1</id><content type="html" xml:base="https://elsesiy.com/blog/dv-lottery-part-1">&lt;p&gt;Over the last couple of months I’ve been asked many times how I got the green card (formally kwown as Permanent Resident Card or Form I-551). So here’s my story..&lt;/p&gt;
+
+&lt;p&gt;As an undergraduate student in Germany I always wanted to study abroad which I eventually did for one quarter at the University of California, Santa Barbara. Prior to this lengthy stay, I had the pleasure to meet and visit friends all over the United States multiple times. This experience led me to believe that I wanted to move here permanently as I really had great experiences so far.&lt;/p&gt;
+
+&lt;p&gt;I started to explore all the options that’ll allow me to relocate eventually and I quickly stumbled upon what is called the DV lottery. And if you’re now confused by the word lottery, it is literally a lottery. So let me tell you how it works. Every year between Oct, 3rd and Nov, 2nd one who wish to participate is required to enter some basic information:&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;Full Name&lt;/li&gt;
+  &lt;li&gt;Gender&lt;/li&gt;
+  &lt;li&gt;Birthdate&lt;/li&gt;
+  &lt;li&gt;City of birth&lt;/li&gt;
+  &lt;li&gt;Country of birth&lt;/li&gt;
+  &lt;li&gt;Country of eligibility for the DV program (usually the same as above)&lt;/li&gt;
+  &lt;li&gt;Photograph (Must follow special &lt;a href=&quot;https://travel.state.gov/content/travel/en/us-visas/visa-information-resources/photos.html&quot;&gt;guidelines&lt;/a&gt;)&lt;/li&gt;
+  &lt;li&gt;Mailing address&lt;/li&gt;
+  &lt;li&gt;Current country of residency&lt;/li&gt;
+  &lt;li&gt;Phone number (optional)&lt;/li&gt;
+  &lt;li&gt;E-mail address&lt;/li&gt;
+  &lt;li&gt;Highest level of education&lt;/li&gt;
+  &lt;li&gt;Current martial status&lt;/li&gt;
+  &lt;li&gt;Number of children&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;After submitting the info, a confirmation number is issued. This confirmation number is crucial to &lt;strong&gt;note down&lt;/strong&gt; as there’s no way to recover it and is the only way to access the application in case of winning.
+&lt;!--more--&gt;
+Fast-forward to May the following year, the Department of State will send you an e-mail saying that you’re now able to see the result of the lottery drawing so whether you’ve been selected to move forward with the application or that it didn’t work out this time. In case of the former the real work begins…&lt;/p&gt;
+
+&lt;p&gt;Being selected doesn’t necessarily mean you’re able to continue with the application as it depends on your batch number and the amount of visa applications your local embassy can process. So if your batch number is i.e. 65000 it’s very unlikely you can move forward as the application needs to take place during a certain time period (referred to as fiscal year). If you’re unable to have everything processed by the end of the fiscal period, you’ll need to start over which means re-applying for the lottery as your lot is only valid for one fiscal year.&lt;/p&gt;
+
+&lt;p&gt;In case you were lucky to have a low lot number, you’ll need to submit a DS-260 form to provide more information on your background, your work experience, qualifications, etc. and again &lt;strong&gt;print the confirmation page&lt;/strong&gt; as you’ll need it to bring to the interview at the embassy. After the Kentucky Consular Center (KCC) reviewed your application (which also includes at which embassy you’re planning to do the interview), the embassy will send you an appointment letter. As the interview preparation is a lengthy, I recommend starting as early as possible to collect all the documents needed. As the list varies depending on the embassy, you should check &lt;a href=&quot;https://travel.state.gov/content/visas/en/immigrate/diversity-visa/if-you-are-selected/prepare-supporting-documents.html&quot;&gt;here&lt;/a&gt;.&lt;/p&gt;
+
+&lt;p&gt;In my particular case for Germany/Frankfurt, I needed to collect all school reports, police reports, birth certificates, proof of sufficient funds, my passport, a mailing address to send the passport back to and everything else that supports you’re being a solid candidate for becoming a Lawful Permanent Resident (LPR). Some of the documents need to be sent in before the appointment and others are fine to bring to the interview (i.e. school reports). Again, this depends highgly on your local embassy, so please check with them if you’ve any doubts what to send in/bring in person. Another very important step is the so-called medical examination which evaluates your physical condition and your history of vaccinations. The thing with the medical exam is that you should take it as close as possible to the interview appointment as its validity is limited to 6 months and thus determines the latest possible entry date to the USA.&lt;/p&gt;
+
+&lt;p&gt;An obstacle with this special appointment is that it can only be conducted by certain (very few) doctors and it’s really hard to get an appointment. In Germany, there’re 6 doctors across the country who are certified to do the examination and only one of them allows you to walk in. Luckily, it’s the one in Frankfurt and close to the embassy so what I did was to go to the embassy without having the medical exam taken and thus my visa inquiry rejected (on purpose). The embassy will re-evaluate your endeavor once it has all the necessary documents so I went to the doctor’s office right after the appointment at the embassy and they sent in the results to the embassy so the process continued as usual. Of course I asked the embassy beforehand as my appointment was really early and there was no way I could’ve finished the doctor’s appointment prior to going to the embassy on the same day. Now I just needed to wait for my visa package to arrive and enter the USA prior to the expiration date of my visa stamp (printed in your passport). An important thing to note here is that you just need to hand over the package before the expiration and as soon as you did, the visa stamp serves as your temporary green card for up to 1 year (calculated from the date of arrival). You can immediately leave the country again if you’re not yet ready to move.&lt;/p&gt;
+
+&lt;p&gt;A quick note on the costs:&lt;/p&gt;
+
+&lt;p&gt;Even though the DV lottery itself is free of charge and please don’t use any of these scam services who charge you to participate on your behalf, the process of getting the visa and later the green card is quite costly (not including the flights).&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;Visa application fee: 330$&lt;/li&gt;
+  &lt;li&gt;Medical examination: approx. 250$&lt;/li&gt;
+  &lt;li&gt;Green card issuing fee: 165$&lt;/li&gt;
+  &lt;li&gt;Misc. expenses (police records, etc.): 100$&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;I’ll continue in the next part to explain how I actually got the physical green card and what else there is to do after your first arrival such as opening a bank account, credit score, employment, travel, etc.&lt;/p&gt;
+
+&lt;p&gt;FYI: I applied 3 times until I was lucky. All in-depth information on the process is provided by the Department of State and can be accessed &lt;a href=&quot;https://travel.state.gov/content/visas/en/immigrate/diversity-visa/entry.html&quot;&gt;here&lt;/a&gt;.&lt;/p&gt;</content><author><name></name></author><category term="diversity visa" /><category term="green card" /><category term="lottery" /><category term="USA" /><summary type="html">Over the last couple of months I’ve been asked many times how I got the green card (formally kwown as Permanent Resident Card or Form I-551). So here’s my story..</summary></entry></feed>
