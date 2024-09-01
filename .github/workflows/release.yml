@@ -25,7 +25,7 @@ jobs:
           cache-version: 0  # Increment number if you re-download cached gems required
       - name: Setup Pages
         id: pages
-        uses: actions/configure-pages@v4
+        uses: actions/configure-pages@v5
       - name: Build with Jekyll
         run: bundle exec jekyll build
         env:
