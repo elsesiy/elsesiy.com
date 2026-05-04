@@ -12,7 +12,7 @@ meta: {}
 <h1 style="text-align: center; margin-bottom: 40px; margin-top: -50px">About</h1>
 
 <div>
-  <p>I'm a Software Engineer <a href="http://snowflake.com/" target="_blank">@Snowflake</a> where I work on multi-cloud Kubernetes & infrastructure automation. Previously, I worked in similar roles  <a href="http://mbrdna.com/" target="_blank">@MBRDNA</a> and <a href="https://www.ibm.com/" target="_blank">@IBM</a>. I live in Silicon Valley but am originally from Berlin. My passion is solving interesting problems and I find a lot of joy in contributing to open source.</p>
+  <p>I'm a Principal Software Engineer <a href="http://snowflake.com/" target="_blank">@Snowflake</a> where I work on multi-cloud Kubernetes & infrastructure automation. Previously, I worked in similar roles  <a href="http://mbrdna.com/" target="_blank">@MBRDNA</a> and <a href="https://www.ibm.com/" target="_blank">@IBM</a>. I live in Silicon Valley but am originally from Berlin. My passion is solving interesting problems and I find a lot of joy in contributing to open source.</p>
 
   <p><b>Technologies</b></p>
 
@@ -35,7 +35,7 @@ meta: {}
   <p>I graduated with a M.Sc. from the Karlsruhe Instite of Technology (<a href="https://www.kit.edu/" target="_blank">KIT</a>) in Germany.</p>
 
   <p><b>Resumé</b></p>
-  <p>If you're interested in my professional and educational history, you can take a look at my resumé <a href="/assets/about/2026-01-19_Jonas-Taha-El-Sesiy-Resume.pdf" target="_blank">here</a>.</p>
+  <p>If you're interested in my professional and educational history, you can take a look at my resumé <a href="/assets/about/2026-05-04_Jonas-Taha-El-Sesiy-Resume.pdf" target="_blank">here</a>.</p>
 </div>
 
 
